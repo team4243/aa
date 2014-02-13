@@ -52,7 +52,7 @@
  *     - PWM 2 connected to front left
  *     - PWM 3 connected to rear right
  *     - PWM 4 connected to rear left
- *     - PWM 5 connected to feed motors
+ *     - PWM 5 connected to load motors
  *     - PWM 6 connected to launch motor
  *   - Digital I/O:
  *     - Channel 1 connected to the launcher retracted switch
@@ -65,7 +65,7 @@ class BuiltinDefaultCode : public IterativeRobot
 {
 	// Declare variable for the robot drive system and declare payload actuators and sensors
 	RobotDrive *m_robot;				// Mecanum drive will use PWM's 2,4,1,3
-	Talon *m_loadMotor; // robot ball loader
+	Jaguar *m_loadMotor; // robot ball loader
 	Talon *m_launchMotor; // robot ball launcher
 	DigitalInput *m_launcherLimit; // limit switch for launcher
 	ADXL345_I2C *m_Accelerometer; // accelerometer
@@ -74,7 +74,7 @@ class BuiltinDefaultCode : public IterativeRobot
 	DigitalInput *m_launchEncoderIncFlag; // Flag indicating encoder mag too close 
 	DigitalInput *m_launchEncoderDecFlag; // Flag indicating encoder mag too far
 	PIDController *m_launchController; // PID Controller for the launcher
-	DigitalOutput *m_digitalOutputTest; 
+	LiveWindow *m_liveWindow; //
 	
 	//Declare driverstation display
 	
@@ -92,20 +92,35 @@ class BuiltinDefaultCode : public IterativeRobot
 
 	// Declare variables for launcher and loader
 	int m_launchAngleCounts;		// launcher encoder counts
-	float m_launchAngleDegrees;		// launch angle in degrees
-	static const float m_degreesPerCount = 360/4096;		// constant that converts count into degrees 
+	double m_launchAngleDegrees;		// launch angle in degrees
+	static const double m_degreesPerCount = 0.3515625;		// constant that converts count into degrees 
 	bool m_loading;					// flag to know ball is being loaded into launcher
 	double m_loadSpeed;				// Motor speed to load ball
+	double m_launchSetpoint;		// Current active setpoint
+	double home;					// Home angle for feeding
+	double m_homeThrottle;			// Launch motor limit under manual control
+	double m_p;						//
+	double m_i;						//
+	double m_d;						//
+	double m_f;						//
+	static const double low = 10; 	// Lowest launch angle
+	static const double medium_low = 30; 	// Medium lowest launch angle
+	static const double medium_high = 50; 	// Medium highest launch angle
+	static const double high = 70; 	// Highest launch angle
 	
 	// Declare variables for launcher PID Controller
-	static const float m_p = 5; // Launcher PID proportional gain (in-lbs/deg)
-	static const float m_i = 0; // Launcher PID integral gain (in-lbs/(deg-sec))
-	static const float m_d = .05; // Launcher PID derivative gain (in-lbs/(deg/sec))
-	static const float m_f = 0; // Launcher PID feed forward gain (in-lbs/???)
-	float m_launchPIDOutput; // Launcher PID Output (in-lbs)
+	static const float m_p_launch = .02; // Launcher PID proportional gain (in-lbs/deg)
+	static const float m_i_launch = 0; // Launcher PID integral gain (in-lbs/(deg-sec))
+	static const float m_d_launch = .002; // Launcher PID derivative gain (in-lbs/(deg/sec))
+	static const float m_f_launch = 0; // Launcher PID feed forward gain (in-lbs/???)
+	static const float m_p_home = .01; // Launcher PID proportional gain (in-lbs/deg)
+	static const float m_i_home = 0; // Launcher PID integral gain (in-lbs/(deg-sec))
+	static const float m_d_home = .001; // Launcher PID derivative gain (in-lbs/(deg/sec))
+	static const float m_f_home = 0; // Launcher PID feed forward gain (in-lbs/???)
 	static const float m_launchPIDPeriod = 0.02; // Launcher PID refresh rate (in seconds)
 
-	
+	// Declare variables for autonomous
+	float m_driving;				// Variable for driving in autonomous
 	
 	// Declare variables for accelerometer
 	double m_accelerationX;
@@ -136,22 +151,29 @@ public:
 
 		// Create a robot using standard right/left robot drive on PWMS 1, 2, 3, and #4
 		m_robot = new RobotDrive(2,4,1,3);
-		m_loadMotor = new Talon(5);
-		m_launchMotor = new Talon(6);
 		
-		//Defining local robot objects
+		//Defining member robot objects
+		m_loadMotor = new Jaguar(5);
+		m_launchMotor = new Talon(6);
+		m_homeThrottle = 0.1;
+		
 		m_launcherLimit = new DigitalInput(1,1); //limit switch for launcher
-		m_Accelerometer = new ADXL345_I2C(1,ADXL345_I2C::kRange_2G); // module 1
 		m_launchEncoder = new Encoder(1, 7, 1, 8, 0, Encoder::k4X);
 		m_launchEncoderIncFlag = new DigitalInput(1,9); // Flag indicating encoder mag too close (false - good)
 		m_launchEncoderDecFlag = new DigitalInput(1,10); // Flag indicating encoder mag too far (false = good)
 		m_launchController = new PIDController(m_p, m_i, m_d, m_f, m_launchEncoder, m_launchMotor, m_launchPIDPeriod);
-		m_digitalOutputTest = new DigitalOutput(1,2); 
+		
 			
 		// Acquire the Driver Station object
 		m_ds = DriverStation::GetInstance();
 		m_priorPacketNumber = 0;
 		m_dsPacketsReceivedInCurrentSecond = 0;
+		m_liveWindow = LiveWindow::GetInstance();
+		m_liveWindow->AddActuator("Launch System", "PID Controller", m_launchController);
+//		m_liveWindow->AddActuator("Launch System", "Talon", m_launchMotor);
+	//	m_liveWindow->AddSensor("Launch System", "Encoder", m_launchEncoderIncFlag);
+//		m_liveWindow->AddSensor("Launch System", "Encoder", m_launchEncoderDecFlag);
+		
 
 		// Define joysticks being used at USB port #1 and USB port #2 on the Drivers Station
 		m_rightStick = new Joystick(1);		// First joystick plugged in
@@ -185,18 +207,8 @@ public:
 	void RobotInit(void) {
 		// Actions which would be performed once (and only once) upon initialization of the
 		// robot would be put here.
-		m_launchController->Disable();
-		m_launchEncoder->SetPIDSourceParameter(PIDSource::kAngle); //
 		
-		/*while (m_launcherLimit->Get() == true){
-			m_launchMotor->Set(-0.1);		// Retracts launch motor slowly
-		}*/
 		
-		m_launchMotor->Set(0.0);		// Stops launch motor
-		m_launchEncoder->Reset();	// Sets encoder to zero
-		m_launchEncoder->Start();
-		m_launchController->SetSetpoint(0); //
-		m_launchController->Enable(); //Enables PID	 
 			
 		printf("RobotInit() completed.\n");
 	}
@@ -211,25 +223,7 @@ public:
 	void AutonomousInit(void) {
 		m_autoPeriodicLoops = 0;				// Reset the loop counter for autonomous mode
 		m_launchMotor->Set(0.0);
-		
-/*		m_feeding = true;
-		m_feedCount = 50;						// (loops)
-		m_feedSpeed = 0.5;						// (unitless)
-		m_feedCounter = 0;
-		m_loading = true;
-		m_loadCount = 60;						// (loops)
-		m_loadPauseCount = 2;					// (loops)
-		m_loadSpeed = 0.2;						// (unitless)
-		m_loadCounter = 0;
-		m_frisbeeCounter = 0;					// (loops) frisbee counter for autonomous
-		m_frisbeeCountMax = 3;					// (loops) maximum number of frisbees we're going to feed in autonomous
-		m_breachFrisbee = true;
-*/		
-//		m_robot->SetSafetyEnabled(false);
-//		m_robotFrontDrive->SetSafetyEnabled(false);		
-//		m_robotRearDrive->SetSafetyEnabled(false);
-//		m_launchMotor->SetSafetyEnabled(false);
-//		m_feedMotor->SetSafetyEnabled(false);
+		m_driving = 0;
 	}
 
 	void TeleopInit(void) {
@@ -237,19 +231,23 @@ public:
 		m_dsPacketsReceivedInCurrentSecond = 0;	// Reset the number of dsPackets in current second
 //		m_driveMode = UNINITIALIZED_DRIVE;		// Set drive mode to uninitialized
 //		ClearSolenoidLEDsKITT();
-		m_launchEncoder->Reset();				// Reset encoder counter to 0 
-		m_digitalOutputTest->Set(0); 
+		m_liveWindow->SetEnabled(1);
 		
-/*		m_feeding = false;
-		m_feedCount = 50;						// (loops)
-		m_feedSpeed = 0.5;						// (unitless)
-		m_feedCounter = 0;
-		m_loading = false;
-		m_loadCount = 58;						// (loops)
-		m_loadPauseCount = 2;					// (loops)
-		m_loadSpeed = 0.2;						// (unitless)
-		m_loadCounter = 0;
-		*/
+// Intialize encoder
+		m_launchEncoder->SetPIDSourceParameter(PIDSource::kDistance); //
+		m_launchEncoder->SetDistancePerPulse(m_degreesPerCount);
+		m_launchEncoder->Reset();				// Reset encoder counter to 0 
+		m_launchEncoder->Start();
+
+		// Initialize PID controller
+		m_launchController->SetInputRange(-10.0, 100.0);
+		m_launchController->SetOutputRange(-1.0, 1.0);
+		home = 0;
+		m_launchController->SetSetpoint(home); //
+		m_launchController->Disable(); //Enables PID
+		m_launchController->Reset();	// Reset internal PID values
+		
+		
 	}
 
 	/********************************** Periodic Routines *************************************/
@@ -275,9 +273,21 @@ public:
 		
 		GetWatchdog().Feed();
 		m_autoPeriodicLoops++;
-	}      
 
+		for(m_driving = 0; m_driving <= 100; m_driving++){
+			m_robot->Drive(0.5, 0.0);
+		}
+		m_robot->Drive(0.0, 0.0);
+		
+		/* Driver station display output. */
+				char msg[256];
+		static	DriverStationLCD *dsLCD = DriverStationLCD::GetInstance();
+				sprintf(msg, "Driving Count = %f ", m_driving);
+				dsLCD->Printf(DriverStationLCD::kUser_Line1, 1, msg);
 	
+		dsLCD->UpdateLCD();
+	}
+		
 	void TeleopPeriodic(void) {
 		// increment the number of teleop periodic loops completed
 		GetWatchdog().Feed();
@@ -288,7 +298,7 @@ public:
 			Get the launcher position
 		*/
 		m_launchAngleCounts = m_launchEncoder->Get();
-		m_launchAngleDegrees = m_launchAngleCounts * m_degreesPerCount;
+		m_launchAngleDegrees = double(m_launchAngleCounts) * m_degreesPerCount;
 		m_launcherLimit->Get();
 
 		
@@ -306,33 +316,98 @@ public:
 						
 			// put Driver Station-dependent code here
 
+		// Control El Toro loader	
+		m_loadMotor->Set(-m_leftStick->GetY());
 			
-		/* Grab z-wheel value and transform from [1, -1] to [0,4600] 
-		 * 4600 rpm is a guess */ 
-		float rawZ, transformedZ;
-		rawZ = m_leftStick->GetZ();
-//		transformedZ = (1.0 - rawZ)/(-2.0);
-		transformedZ = -2300.0 * rawZ + 2300.0;
+		// Get desired launch angles
+		if(!m_launchController->IsEnabled() && m_launchAngleDegrees <= 3.0){
+			if(m_leftStick->GetRawButton(5)){
+				m_launchSetpoint= low;
+			}
+			else if(m_leftStick->GetRawButton(3)){
+				m_launchSetpoint= medium_low;			
+			}
+			else if(m_leftStick->GetRawButton(4)){
+				m_launchSetpoint= medium_high;
 		
-		m_digitalOutputTest->Set(0); 
+			}
+			else if(m_leftStick->GetRawButton(6)){
+				m_launchSetpoint= high;			
+			}
+		}
+		else if(!m_launchController->IsEnabled()){
+			m_launchSetpoint= home;
+		}
+		
+		m_launchController->SetSetpoint(m_launchSetpoint);
 
+		if(m_leftStick->GetTrigger() && !m_leftStick->GetRawButton(11)){	// Trigger is depressed, but 11 is not
+			m_p = m_p_launch;
+			m_i = m_i_launch;
+			m_d = m_d_launch;
+			m_f = m_f_launch;
+			m_launchController->Enable();
+		}
+		else{
+			m_launchController->Disable();
+		}
 		
-		/* Driver station display output. */
+		// Set home position
+		if (m_launcherLimit->Get() == 1 && m_leftStick->GetRawButton(11)){
+			m_p = m_p_home;
+			m_i = m_i_home;
+			m_d = m_d_home;
+			m_f = m_f_home;
+			if(m_leftStick->GetRawButton(7)){
+				m_launchMotor->Set(-m_homeThrottle);		// Adjusts launch motor slowly
+			}
+			else if(m_leftStick->GetRawButton(8)){
+				m_launchMotor->Set(m_homeThrottle);		// Adjusts launch motor slowly
+			}
+			else{
+				m_launchMotor->Set(0.0);		// Stops launch motor
+			}
+		}
+		else if (!m_launcherLimit->Get() == 1 && m_leftStick->GetRawButton(11)) { // After we found the home switch
+			m_launchMotor->Set(0.0);		// Stops launch motor
+			m_launchEncoder->Reset();		// Resets the encoder counts to 0
+			home = m_launchEncoder->GetDistance();	// Sets home to last reset value	
+		}	
+		
+		
+/* Driver station display output. */
 		char msg[256];
 static	DriverStationLCD *dsLCD = DriverStationLCD::GetInstance();
 		sprintf(msg, "Mag Inc = %u ", m_launchEncoderIncFlag->Get());
 		dsLCD->Printf(DriverStationLCD::kUser_Line1, 1, msg);
 		sprintf(msg, "Mag Dec = %u ", m_launchEncoderDecFlag->Get());
 		dsLCD->Printf(DriverStationLCD::kUser_Line2, 1, msg);
-		sprintf(msg, "Encoder Bits = %d ", m_launchEncoder->Get()); //Bits = Counts
+/*		sprintf(msg, "Deg/Count = %f ", m_degreesPerCount);
+		dsLCD->Printf(DriverStationLCD::kUser_Line2, 1, msg);
+		sprintf(msg, "Launch Setpoint = %f ", m_launchSetpoint);
+		dsLCD->Printf(DriverStationLCD::kUser_Line1, 1, msg); */
+		sprintf(msg, "Launcher Angle = %f ", m_launchAngleDegrees);				// Launcher angle
 		dsLCD->Printf(DriverStationLCD::kUser_Line3, 1, msg);
-		sprintf(msg, "Launch Ang Deg = %f ", m_launchAngleDegrees);
-		dsLCD->Printf(DriverStationLCD::kUser_Line4, 1, msg);
+/*		sprintf(msg, "PID In = %f ", m_launchEncoder->PIDGet());				// PID
+		dsLCD->Printf(DriverStationLCD::kUser_Line2, 1, msg);*/
+	/*	sprintf(msg, "Encoder Rate = %f ", m_launchEncoder->GetRate());			// 
+		dsLCD->Printf(DriverStationLCD::kUser_Line3, 1, msg);*/							
 		sprintf(msg, "PID Error = %f (?-?)", m_launchController->GetError());
+		dsLCD->Printf(DriverStationLCD::kUser_Line4, 1, msg); 
+		sprintf(msg, "Launch Motor = %f ", m_launchMotor->Get());
 		dsLCD->Printf(DriverStationLCD::kUser_Line5, 1, msg);
-		sprintf(msg, "Launcher Limit = %u (On/Off)", m_launcherLimit->Get());
-		dsLCD->Printf(DriverStationLCD::kUser_Line6, 1, msg);
+		sprintf(msg, "PID Enabled = %u ", m_launchController->IsEnabled());
+		dsLCD->Printf(DriverStationLCD::kUser_Line6, 1, msg); 
+/*		sprintf(msg, "Limit Switch = %d ", m_launcherLimit->Get());
+		dsLCD->Printf(DriverStationLCD::kUser_Line6, 1, msg);*/
+
+		SmartDashboard::PutData("PIDSubsystem", m_launchController);
+		//SmartDashboard::PutNumber("PIDError", m_launchController->GetError());
 		
+/*		SmartDashboard::PutData("Talon", m_launchMotor);
+		SmartDashboard::PutBoolean("Encoder", m_launchEncoderIncFlag);
+		SmartDashboard::PutBoolean("Encoder", m_launchEncoderDecFlag);*/
+
 		// line number (enum), starting col, format string, args for format string ...
 		dsLCD->UpdateLCD();
 		
