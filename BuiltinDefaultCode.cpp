@@ -65,6 +65,7 @@ class BuiltinDefaultCode : public IterativeRobot
 {
 	// Declare variable for the robot drive system and declare payload actuators and sensors
 	RobotDrive *m_robot;				// Mecanum drive will use PWM's 2,4,1,3
+	double m_driveGain;				// detune the drive system as needed
 	Jaguar *m_loadMotor; // robot ball loader
 	Talon *m_launchMotor; // robot ball launcher
 	DigitalInput *m_launcherLimit; // limit switch for launcher
@@ -99,24 +100,16 @@ class BuiltinDefaultCode : public IterativeRobot
 	double m_launchSetpoint;		// Current active setpoint
 	double home;					// Home angle for feeding
 	double m_homeThrottle;			// Launch motor limit under manual control
-	double m_p;						//
-	double m_i;						//
-	double m_d;						//
-	double m_f;						//
-	static const double low = 10; 	// Lowest launch angle
-	static const double medium_low = 30; 	// Medium lowest launch angle
-	static const double medium_high = 50; 	// Medium highest launch angle
-	static const double high = 70; 	// Highest launch angle
+	static const double low = 50; 	// Lowest launch angle
+	static const double medium_low = 70; 	// Medium lowest launch angle
+	static const double medium_high = 80; 	// Medium highest launch angle
+	static const double high = 90; 	// Highest launch angle
 	
 	// Declare variables for launcher PID Controller
-	static const float m_p_launch = .02; // Launcher PID proportional gain (in-lbs/deg)
-	static const float m_i_launch = 0; // Launcher PID integral gain (in-lbs/(deg-sec))
-	static const float m_d_launch = .002; // Launcher PID derivative gain (in-lbs/(deg/sec))
-	static const float m_f_launch = 0; // Launcher PID feed forward gain (in-lbs/???)
-	static const float m_p_home = .01; // Launcher PID proportional gain (in-lbs/deg)
-	static const float m_i_home = 0; // Launcher PID integral gain (in-lbs/(deg-sec))
-	static const float m_d_home = .001; // Launcher PID derivative gain (in-lbs/(deg/sec))
-	static const float m_f_home = 0; // Launcher PID feed forward gain (in-lbs/???)
+	static const float m_p = .1; // Launcher PID proportional gain (in-lbs/deg)
+	static const float m_i = 0; // Launcher PID integral gain (in-lbs/(deg-sec))
+	static const float m_d = .01; // Launcher PID derivative gain (in-lbs/(deg/sec))
+	static const float m_f = 0; // Launcher PID feed forward gain (in-lbs/???)
 	static const float m_launchPIDPeriod = 0.02; // Launcher PID refresh rate (in seconds)
 
 	// Declare variables for autonomous
@@ -229,7 +222,10 @@ public:
 	void TeleopInit(void) {
 		m_telePeriodicLoops = 0;				// Reset the loop counter for teleop mode
 		m_dsPacketsReceivedInCurrentSecond = 0;	// Reset the number of dsPackets in current second
-//		m_driveMode = UNINITIALIZED_DRIVE;		// Set drive mode to uninitialized
+//	Set Drive Gain
+		m_driveGain = 0.5;	// Detune drive system as needed
+		
+		//		m_driveMode = UNINITIALIZED_DRIVE;		// Set drive mode to uninitialized
 //		ClearSolenoidLEDsKITT();
 		m_liveWindow->SetEnabled(1);
 		
@@ -244,8 +240,8 @@ public:
 		m_launchController->SetOutputRange(-1.0, 1.0);
 		home = 0;
 		m_launchController->SetSetpoint(home); //
-		m_launchController->Disable(); //Enables PID
 		m_launchController->Reset();	// Reset internal PID values
+		m_launchController->Disable(); //Enables PID
 		
 		
 	}
@@ -342,10 +338,6 @@ public:
 		m_launchController->SetSetpoint(m_launchSetpoint);
 
 		if(m_leftStick->GetTrigger() && !m_leftStick->GetRawButton(11)){	// Trigger is depressed, but 11 is not
-			m_p = m_p_launch;
-			m_i = m_i_launch;
-			m_d = m_d_launch;
-			m_f = m_f_launch;
 			m_launchController->Enable();
 		}
 		else{
@@ -354,10 +346,6 @@ public:
 		
 		// Set home position
 		if (m_launcherLimit->Get() == 1 && m_leftStick->GetRawButton(11)){
-			m_p = m_p_home;
-			m_i = m_i_home;
-			m_d = m_d_home;
-			m_f = m_f_home;
 			if(m_leftStick->GetRawButton(7)){
 				m_launchMotor->Set(-m_homeThrottle);		// Adjusts launch motor slowly
 			}
@@ -414,7 +402,7 @@ static	DriverStationLCD *dsLCD = DriverStationLCD::GetInstance();
 		// use arcade drive
 		//m_driveGain = (1.0 - m_rightStick->GetZ())/(-2.0);
 		//m_robot->ArcadeDrive(m_rightStick);			// drive with arcade style (use right stick)
-		m_robot->MecanumDrive_Polar(m_rightStick->GetMagnitude(), m_rightStick->GetDirectionDegrees(), m_rightStick->GetZ());			
+		m_robot->MecanumDrive_Polar(m_rightStick->GetMagnitude()*m_driveGain, m_rightStick->GetDirectionDegrees(), m_rightStick->GetZ()*m_driveGain);			
 			// drive with mecanum style (use right stick for steering and left stick for rotation)
 				
 	} 
