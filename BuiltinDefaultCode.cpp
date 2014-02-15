@@ -100,10 +100,15 @@ class BuiltinDefaultCode : public IterativeRobot
 	double m_launchSetpoint;		// Current active setpoint
 	double home;					// Home angle for feeding
 	double m_homeThrottle;			// Launch motor limit under manual control
-	static const double low = 50; 	// Lowest launch angle
-	static const double medium_low = 70; 	// Medium lowest launch angle
-	static const double medium_high = 80; 	// Medium highest launch angle
-	static const double high = 90; 	// Highest launch angle
+	static const double low = 75; 	// Lowest launch angle
+	static const double medium_low = 80; 	// Medium lowest launch angle
+	static const double medium_high = 85; 	// Medium highest launch angle
+	static const double high = 90; 	// Close ranged shooting (90)
+	static const double launch_angle_slowdown_pos = 20;  // Angle at which launcher slows down
+	static const double slow_range = 0.25;  // Speed of launcher in slowdown position 
+	static const double neg_slow_range = -0.25;  // Speed of launcher in slowdown position
+	static const double max_range = 1.0;  // Maximum speed of the launcher
+	static const double neg_max_range = -1.0;  // Maximum speed of the launcher
 	
 	// Declare variables for launcher PID Controller
 	static const float m_p = .1; // Launcher PID proportional gain (in-lbs/deg)
@@ -111,7 +116,8 @@ class BuiltinDefaultCode : public IterativeRobot
 	static const float m_d = .01; // Launcher PID derivative gain (in-lbs/(deg/sec))
 	static const float m_f = 0; // Launcher PID feed forward gain (in-lbs/???)
 	static const float m_launchPIDPeriod = 0.02; // Launcher PID refresh rate (in seconds)
-
+	static const double drive_gain = 0.3;	// detune the drive system as needed
+	
 	// Declare variables for autonomous
 	float m_driving;				// Variable for driving in autonomous
 	
@@ -223,7 +229,6 @@ public:
 		m_telePeriodicLoops = 0;				// Reset the loop counter for teleop mode
 		m_dsPacketsReceivedInCurrentSecond = 0;	// Reset the number of dsPackets in current second
 //	Set Drive Gain
-		m_driveGain = 0.5;	// Detune drive system as needed
 		
 		//		m_driveMode = UNINITIALIZED_DRIVE;		// Set drive mode to uninitialized
 //		ClearSolenoidLEDsKITT();
@@ -237,7 +242,7 @@ public:
 
 		// Initialize PID controller
 		m_launchController->SetInputRange(-10.0, 100.0);
-		m_launchController->SetOutputRange(-1.0, 1.0);
+		m_launchController->SetOutputRange(neg_max_range, max_range);
 		home = 0;
 		m_launchController->SetSetpoint(home); //
 		m_launchController->Reset();	// Reset internal PID values
@@ -344,8 +349,15 @@ public:
 			m_launchController->Disable();
 		}
 		
+		if(m_launchAngleDegrees < launch_angle_slowdown_pos){
+			m_launchController->SetOutputRange(neg_slow_range, slow_range);
+		}
+		else{
+			m_launchController->SetOutputRange(neg_max_range, max_range);
+		}
 		// Set home position
-		if (m_launcherLimit->Get() == 1 && m_leftStick->GetRawButton(11)){
+		if (m_leftStick->GetRawButton(11)){
+		//if (m_launcherLimit->Get() == 1 && m_leftStick->GetRawButton(11)){
 			if(m_leftStick->GetRawButton(7)){
 				m_launchMotor->Set(-m_homeThrottle);		// Adjusts launch motor slowly
 			}
@@ -402,7 +414,7 @@ static	DriverStationLCD *dsLCD = DriverStationLCD::GetInstance();
 		// use arcade drive
 		//m_driveGain = (1.0 - m_rightStick->GetZ())/(-2.0);
 		//m_robot->ArcadeDrive(m_rightStick);			// drive with arcade style (use right stick)
-		m_robot->MecanumDrive_Polar(m_rightStick->GetMagnitude()*m_driveGain, m_rightStick->GetDirectionDegrees(), m_rightStick->GetZ()*m_driveGain);			
+		m_robot->MecanumDrive_Polar(m_rightStick->GetMagnitude()*drive_gain, m_rightStick->GetDirectionDegrees(), m_rightStick->GetZ()*drive_gain);			
 			// drive with mecanum style (use right stick for steering and left stick for rotation)
 				
 	} 
