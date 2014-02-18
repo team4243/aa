@@ -104,7 +104,7 @@ class BuiltinDefaultCode : public IterativeRobot
 	static const double medium_low = 80; 	// Medium lowest launch angle
 	static const double medium_high = 85; 	// Medium highest launch angle
 	static const double high = 90; 	// Close ranged shooting (90)
-	static const double launch_angle_slowdown_pos = 20;  // Angle at which launcher slows down
+	static const double launch_angle_slowdown_pos = 7;  // Angle at which launcher slows down
 	static const double slow_range = 0.25;  // Speed of launcher in slowdown position 
 	static const double neg_slow_range = -0.25;  // Speed of launcher in slowdown position
 	static const double max_range = 1.0;  // Maximum speed of the launcher
@@ -275,11 +275,12 @@ public:
 		GetWatchdog().Feed();
 		m_autoPeriodicLoops++;
 
-		for(m_driving = 0; m_driving <= 100; m_driving++){
+/*		for(m_driving = 0; m_driving <= 10
+		0; m_driving++){
 			m_robot->Drive(0.5, 0.0);
 		}
 		m_robot->Drive(0.0, 0.0);
-		
+*/		
 		/* Driver station display output. */
 				char msg[256];
 		static	DriverStationLCD *dsLCD = DriverStationLCD::GetInstance();
